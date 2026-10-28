@@ -1,29 +1,76 @@
 import React, { useState } from 'react';
 import { 
   LayoutDashboard, Users, MessageSquare, 
-  FileText, Bell, Menu, X, LogOut, User as UserIcon, Search
+  FileText, Bell, Menu, X, LogOut, User as UserIcon, Search, Sparkles, Inbox
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
-import { User } from './types';
+import { ConnectionRequest, User } from './types';
+import { formatTimeAgo } from './lib/requests';
+import { describeMatchItems, matchChatId, requesterDraft } from './lib/matches';
 
 interface LayoutProps {
   user: User;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onLogout: () => void;
-  actionsNeededRead: boolean;
-  setActionsNeededRead: (read: boolean) => void;
+  connections: ConnectionRequest[];
+  onOpenChat: (chatId: string, draftText?: string) => void;
   children: React.ReactNode;
+}
+
+interface Notification {
+  id: string;
+  kind: 'match' | 'request';
+  request: ConnectionRequest;
+  timestamp: number;
+}
+
+// When the notifications panel was last opened, per user, so the bell only
+// shows a dot for notifications that arrived since.
+const seenKey = (uid: string) => `notificationsSeenAt_${uid}`;
+
+function readSeenAt(uid: string): number {
+  try {
+    return Number(localStorage.getItem(seenKey(uid))) || 0;
+  } catch {
+    return 0;
+  }
 }
 
 export default function Layout({ 
   user, activeTab, setActiveTab, onLogout, 
-  actionsNeededRead, setActionsNeededRead, 
+  connections, onOpenChat,
   children 
 }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [seenAt, setSeenAt] = useState(() => readSeenAt(user.id));
+
+  // Built only from the user's live requests: accepted requests/offers are
+  // matches, and pending ones addressed to the user need a response.
+  const notifications: Notification[] = connections
+    .flatMap((request): Notification[] => {
+      if (request.status === 'approved') {
+        return [{ id: `match-${request.id}`, kind: 'match', request, timestamp: request.respondedAt ?? request.timestamp }];
+      }
+      if (request.status === 'pending' && request.type === 'received') {
+        return [{ id: `request-${request.id}`, kind: 'request', request, timestamp: request.timestamp }];
+      }
+      return [];
+    })
+    .sort((a, b) => b.timestamp - a.timestamp);
+  const hasUnseen = notifications.some(n => n.timestamp > seenAt);
+  const partnerLabel = user.type === 'school' ? 'community partner' : 'school';
+
+  const openNotifications = () => {
+    setIsNotificationsOpen(true);
+    const now = Date.now();
+    setSeenAt(now);
+    try {
+      localStorage.setItem(seenKey(user.id), String(now));
+    } catch {}
+  };
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -50,11 +97,11 @@ export default function Layout({
 
           <div className="flex items-center gap-4">
             <button 
-              onClick={() => setIsNotificationsOpen(true)}
+              onClick={openNotifications}
               className="p-2 hover:bg-slate-100 rounded-full transition-colors relative"
             >
               <Bell size={20} className="text-brand-primary" />
-              {!actionsNeededRead && (
+              {hasUnseen && (
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-brand-primary rounded-full border-2 border-white" />
               )}
             </button>
@@ -169,69 +216,75 @@ export default function Layout({
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
                   <p className="text-sm text-slate-500 mb-6">Keep track of your latest activity</p>
-                  
-                    <div 
-                      onClick={() => setActionsNeededRead(true)}
-                      className={cn(
-                        "p-4 rounded-[5px] border cursor-pointer transition-all",
-                        actionsNeededRead 
-                          ? "border-slate-100 bg-white" 
-                          : "border-brand-primary/20 bg-brand-secondary/30"
-                      )}
-                    >
-                      <div className="flex justify-between mb-1">
-                        <span className="text-sm font-bold text-brand-dark flex items-center gap-2">
-                          <div className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
-                          New Connection Request
-                        </span>
-                        <span className="text-xs text-slate-400">Just now</span>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        Hope Feeling Foundation wants to connect
-                      </p>
-                    </div>
 
-                    <div 
-                      onClick={() => setActionsNeededRead(true)}
-                      className={cn(
-                        "p-4 rounded-[5px] border cursor-pointer transition-all",
-                        actionsNeededRead 
-                          ? "border-slate-100 bg-white" 
-                          : "border-brand-primary/20 bg-brand-secondary/30"
-                      )}
-                    >
-                      <div className="flex justify-between mb-1">
-                        <span className="text-sm font-bold text-brand-dark flex items-center gap-2">
-                          <div className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
-                          New Connection Request
-                        </span>
-                        <span className="text-xs text-slate-400">48 mins ago</span>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        The Woman's Shelter wants to connect
-                      </p>
+                  {notifications.length === 0 && (
+                    <div className="h-48 flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-[5px] text-center p-6">
+                      <Inbox size={32} className="text-slate-300 mb-3" />
+                      <p className="text-sm font-semibold text-slate-600">Nothing to see here</p>
+                      <p className="text-xs text-slate-400 mt-1">Matches and new requests will show up here.</p>
                     </div>
+                  )}
 
-                  <div className="p-4 rounded-[5px] border border-slate-100 bg-white relative">
-                    <div className="flex justify-between mb-1">
-                      <span className="text-sm font-bold text-brand-dark flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
-                        Request Approved
-                      </span>
-                      <span className="text-xs text-slate-400">1 day ago</span>
-                    </div>
-                    <p className="text-sm text-slate-600 mb-3">Successfully approved Youth Outreach</p>
-                    <button 
-                      onClick={() => {
-                        setActiveTab('messages');
-                        setIsNotificationsOpen(false);
-                      }}
-                      className="text-xs font-bold text-brand-primary hover:underline flex items-center gap-1"
-                    >
-                      <MessageSquare size={14} />
-                      Message Partner to coordinate
-                    </button>
-                  </div>
+                  {notifications.map(({ id, kind, request, timestamp }) => {
+                    const isNew = timestamp > seenAt;
+                    return kind === 'match' ? (
+                      <div
+                        key={id}
+                        className={cn(
+                          "p-4 rounded-[5px] border",
+                          isNew ? "border-brand-primary/20 bg-brand-secondary/30" : "border-slate-100 bg-white"
+                        )}
+                      >
+                        <div className="flex justify-between mb-1 gap-2">
+                          <span className="text-sm font-bold text-brand-dark flex items-center gap-2">
+                            <Sparkles size={14} className="text-brand-primary" />
+                            Match Found!
+                          </span>
+                          <span className="text-xs text-slate-400 whitespace-nowrap">{formatTimeAgo(timestamp)}</span>
+                        </div>
+                        <p className="text-sm text-slate-600 mb-3">
+                          You've been matched with <strong>{request.fromName}</strong> for {describeMatchItems(request)}.
+                          Begin communicating with the {partnerLabel} to coordinate the exchange.
+                        </p>
+                        <button 
+                          onClick={() => {
+                            setIsNotificationsOpen(false);
+                            onOpenChat(
+                              matchChatId(user, request),
+                              request.type === 'sent' ? requesterDraft(request.fromName) : undefined
+                            );
+                          }}
+                          className="text-xs font-bold text-brand-primary hover:underline flex items-center gap-1"
+                        >
+                          <MessageSquare size={14} />
+                          Message {request.fromName}
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        key={id}
+                        onClick={() => {
+                          setIsNotificationsOpen(false);
+                          setActiveTab('requests');
+                        }}
+                        className={cn(
+                          "p-4 rounded-[5px] border cursor-pointer transition-all hover:border-brand-primary/30",
+                          isNew ? "border-brand-primary/20 bg-brand-secondary/30" : "border-slate-100 bg-white"
+                        )}
+                      >
+                        <div className="flex justify-between mb-1 gap-2">
+                          <span className="text-sm font-bold text-brand-dark flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-brand-primary" />
+                            {request.kind === 'offer' ? 'New Supply Offer' : 'New Supply Request'}
+                          </span>
+                          <span className="text-xs text-slate-400 whitespace-nowrap">{formatTimeAgo(timestamp)}</span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          {request.fromName} {request.kind === 'offer' ? 'has available' : 'is requesting'} {describeMatchItems(request)}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
               </motion.aside>
             </>

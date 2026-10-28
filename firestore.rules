@@ -128,7 +128,10 @@ service cloud.firestore {
 
     // --- Chats & messages (Messages.tsx "messages sent" & "messages received") ---
     match /chats/{chatId} {
-      allow read, update: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+      // `resource == null` lets ensureChat (src/lib/chats.ts) check whether a chat exists yet.
+      allow read: if isSignedIn() &&
+        (resource == null || request.auth.uid in resource.data.participantUids);
+      allow update: if isSignedIn() && request.auth.uid in resource.data.participantUids;
       allow create: if isSignedIn() && request.auth.uid in request.resource.data.participantUids;
       allow delete: if false;
 

@@ -78,14 +78,6 @@ export const PROFILE_FIELDS: ProfileField[] = [
     appliesTo: 'school',
   },
   {
-    key: 'resourcesProvided',
-    label: 'Resources you can provide',
-    type: 'multiselect',
-    public: true,
-    options: RESOURCE_CATEGORIES,
-    appliesTo: 'community-partner',
-  },
-  {
     key: 'serviceArea',
     label: 'Area you serve',
     type: 'text',

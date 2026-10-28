@@ -57,7 +57,9 @@ export default function RequestDetailModal({ request, onClose, onApprove, onDeny
             <div>
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-brand-primary">
-                  {request.type === 'received' ? 'Incoming Resource Request' : 'Outgoing Partnership Request'}
+                  {request.kind === 'offer'
+                    ? (request.type === 'received' ? 'Supply Offer' : 'Your Posted Supplies')
+                    : (request.type === 'received' ? 'Incoming Resource Request' : 'Outgoing Resource Request')}
                 </span>
                 <span className="text-xs text-slate-400">•</span>
                 <Tag 
@@ -100,16 +102,16 @@ export default function RequestDetailModal({ request, onClose, onApprove, onDeny
             <div>
               <span className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider">Contact Person</span>
               <span className="font-semibold text-slate-800 truncate block">
-                {data?.contactName || 'Jane Doe'}
+                {data?.contactName || 'Not provided'}
               </span>
-              <span className="block text-[11px] text-slate-400 truncate">{data?.contactRole || 'Resource Coordinator'}</span>
+              <span className="block text-[11px] text-slate-400 truncate">{data?.contactRole || ''}</span>
             </div>
             <div>
               <span className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider">Location / Distance</span>
               <span className="font-semibold text-slate-800 truncate block">
-                {request.distance !== 'N/A' ? request.distance : (data?.state || 'Midland, MI')}
+                {request.distance !== 'N/A' ? request.distance : (data?.state || 'Not provided')}
               </span>
-              <span className="block text-[11px] text-slate-400">{data?.phone || '(555) 342-8921'}</span>
+              <span className="block text-[11px] text-slate-400">{data?.phone || ''}</span>
             </div>
           </div>
 
@@ -125,7 +127,7 @@ export default function RequestDetailModal({ request, onClose, onApprove, onDeny
                 <span className="text-sm font-bold text-slate-800 capitalize mt-0.5">{request.item}</span>
               </div>
               <div className="p-3 bg-slate-50 rounded-[5px] border border-slate-100">
-                <span className="text-slate-400 block font-medium">Quantity Requested</span>
+                <span className="text-slate-400 block font-medium">{request.kind === 'offer' ? 'Total Quantity' : 'Quantity Requested'}</span>
                 <span className="text-sm font-bold text-brand-primary mt-0.5">{request.quantity} Units</span>
               </div>
               <div className="p-3 bg-slate-50 rounded-[5px] border border-slate-100">
@@ -135,6 +137,20 @@ export default function RequestDetailModal({ request, onClose, onApprove, onDeny
                 </span>
               </div>
             </div>
+
+            {request.offeredItems && request.offeredItems.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <span className="text-[11px] font-bold text-slate-400 uppercase block mb-2">Items Available</span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                  {request.offeredItems.map((line, i) => (
+                    <div key={i} className="flex justify-between items-center p-2 rounded bg-slate-50 border border-slate-100">
+                      <span className="text-slate-600 truncate pr-2">{line.item}</span>
+                      <span className="font-bold text-slate-900">{line.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {request.description && (
               <div className="mt-4 pt-3 border-t border-slate-100">
@@ -265,18 +281,27 @@ export default function RequestDetailModal({ request, onClose, onApprove, onDeny
             <div className="space-y-1 text-xs">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Organization Direct Support</span>
               <p className="font-bold text-slate-800">{request.fromName}</p>
-              <p className="text-slate-600">Contact: Jane Doe (Coordinator)</p>
+              {data?.contactName && (
+                <p className="text-slate-600">Contact: {data.contactName}{data.contactRole ? ` (${data.contactRole})` : ''}</p>
+              )}
             </div>
             <div className="space-y-1 text-xs sm:text-right">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Communication Line</span>
-              <p className="text-slate-700 flex sm:justify-end items-center gap-1.5">
-                <Phone size={13} className="text-brand-primary" />
-                (555) 342-8921
-              </p>
-              <p className="text-slate-700 flex sm:justify-end items-center gap-1.5">
-                <Mail size={13} className="text-brand-primary" />
-                coordination@organization.org
-              </p>
+              {data?.phone && (
+                <p className="text-slate-700 flex sm:justify-end items-center gap-1.5">
+                  <Phone size={13} className="text-brand-primary" />
+                  {data.phone}
+                </p>
+              )}
+              {data?.email && (
+                <p className="text-slate-700 flex sm:justify-end items-center gap-1.5">
+                  <Mail size={13} className="text-brand-primary" />
+                  {data.email}
+                </p>
+              )}
+              {!data?.phone && !data?.email && (
+                <p className="text-slate-500">Use Messages to reach this organization once matched.</p>
+              )}
             </div>
           </div>
         </div>
@@ -305,11 +330,11 @@ export default function RequestDetailModal({ request, onClose, onApprove, onDeny
                 }}
                 className="px-5 py-2.5 rounded-[5px] hover:bg-red-50 text-slate-600 hover:text-red-600 text-xs font-semibold transition-all cursor-pointer shadow-none"
               >
-                {request.type === 'received' ? 'Deny Request' : 'Cancel Request'}
+                {request.type === 'received' ? 'Decline' : (request.kind === 'offer' ? 'Remove Offer' : 'Cancel Request')}
               </button>
             )}
 
-            {onApprove && request.type === 'received' && (
+            {onApprove && request.type === 'received' && request.status === 'pending' && (
               <button 
                 type="button"
                 onClick={() => {
@@ -319,7 +344,7 @@ export default function RequestDetailModal({ request, onClose, onApprove, onDeny
                 className="px-6 py-2.5 rounded-[5px] bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-none"
               >
                 <Check size={15} />
-                <span>Approve Request</span>
+                <span>{request.kind === 'offer' ? 'Accept Offer' : 'Accept Request'}</span>
               </button>
             )}
           </div>

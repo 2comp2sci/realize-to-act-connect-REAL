@@ -252,13 +252,13 @@ export default function Search({ connections, setConnections, user }: SearchProp
         type: 'received',
         status: partner.isConnected ? 'approved' : 'pending',
         item: partner.tags?.[0] || 'Community Resources',
-        quantity: partner.quantity || 100,
-        distance: partner.distance || 'Midland, MI',
+        quantity: partner.quantity || 0,
+        distance: partner.distance || 'N/A',
         timeAgo: partner.postedAt || 'Recently active',
         timestamp: Date.now(),
-        description: partner.description || 'Community resource partner dedicated to providing essential materials and distribution support to classrooms.',
-        postedAt: partner.postedAt || 'Active distribution',
-        availableUntil: partner.availableUntil || 'Ongoing partnership',
+        description: partner.description || undefined,
+        postedAt: partner.postedAt || undefined,
+        availableUntil: partner.availableUntil || undefined,
         schoolRequestData: {
           schoolName: partner.name,
           contactName: partner.contactName || 'Not provided',
@@ -269,11 +269,9 @@ export default function Search({ connections, setConnections, user }: SearchProp
           requestScope: 'district',
           expectedStudentsInNeed: partner.quantity || 0,
           selectedCategories: partner.tags,
-          logistics: {
-            method: 'Standard scheduled drop-off at designated facility dock or main entrance',
-            eventDate: partner.availableUntil || 'Current semester',
-            specialInstructions: partner.dropOffDetails || 'Staff or volunteer coordinator will greet and assist unloading.'
-          }
+          ...(partner.dropOffDetails && {
+            logistics: { method: 'Coordinate drop-off through Messages', specialInstructions: partner.dropOffDetails },
+          })
         }
       };
       setSelectedRequestForDetailModal(generatedReq);

@@ -18,11 +18,18 @@
 //   schoolRequestData: SchoolResourceRequest | null   resource manifest (categories,
 //                                   items, grade bands, logistics) attached by the
 //                                   Search page's supply request form
+//   kind:         'request' | 'offer'   a school asking for supplies, or a community
+//                                   partner posting supplies it has available
+//                                   (missing on older documents = 'request')
+//   offeredItems: { item, quantity }[] | null   line items on an offer
+//   fromUserType: 'school' | 'community-partner' | null
+//   availableUntil: string | null   optional end date on an offer (YYYY-MM-DD)
 //   status:       'pending' | 'approved' | 'denied'
 //   createdAt:    Timestamp (serverTimestamp)
 //   updatedAt:    Timestamp (serverTimestamp)
 //
-// "Sent" vs "received" not stored, derived per-viewer from fromUid.
+// "Sent" vs "received" not stored, derived per-viewer from fromUid. Broadcast
+// requests go to community partners and broadcast offers go to schools.
 
 import {
   addDoc,
@@ -39,7 +46,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { AvailabilitySlot, ConnectionRequest, SchoolResourceRequest } from '../types';
+import { AvailabilitySlot, ConnectionRequest, OfferedItem, SchoolResourceRequest, UserType } from '../types';
 
 const REQUESTS_COLLECTION = 'requests';
 
@@ -56,6 +63,10 @@ export interface NewRequestInput {
   description?: string;
   availability?: AvailabilitySlot[];
   schoolRequestData?: SchoolResourceRequest;
+  kind?: 'request' | 'offer';
+  offeredItems?: OfferedItem[];
+  fromUserType?: UserType;
+  availableUntil?: string;
 }
 
 /** Short relative time ("Just now", "5 mins ago", "3 days ago") for request cards. */
@@ -88,27 +99,42 @@ function toConnectionRequest(id: string, data: DocumentData, viewerUid: string):
     availability: data.availability ?? undefined,
     isNew: data.status === 'pending' && !isSent,
     schoolRequestData: data.schoolRequestData ?? undefined,
+    kind: data.kind === 'offer' ? 'offer' : 'request',
+    offeredItems: data.offeredItems ?? undefined,
+    respondedAt: data.status !== 'pending' ? data.updatedAt?.toMillis?.() : undefined,
+    isBroadcast: data.toUid === null,
+    availableUntil: data.availableUntil ?? undefined,
   };
 }
 
 /**
  * Subscribes to every request the given uid can see: requests they sent,
- * requests addressed directly to them, and open broadcast requests (toUid
- * == null) from everyone else. Calls `onChange` with the merged, sorted
- * list every time any of the underlying queries update.
+ * requests addressed directly to them, and open broadcasts (toUid == null)
+ * meant for their organization type — school requests for community
+ * partners, community partner offers for schools. Calls `onChange` with the
+ * merged, sorted list every time any of the underlying queries update.
  */
 export function subscribeToRequests(
   uid: string,
+  userType: UserType,
   onChange: (requests: ConnectionRequest[]) => void
 ): Unsubscribe {
-  const results = new Map<string, ConnectionRequest>();
+  // One map per query, merged on emit: a claimed broadcast leaves the
+  // broadcast query and joins the received query, and those two snapshots
+  // can arrive in either order. Merging the broadcast map first lets the
+  // up-to-date sent/received copy win while a stale broadcast copy lingers.
+  const resultsByQuery: Map<string, ConnectionRequest>[] = [];
 
   const emit = () => {
-    onChange(Array.from(results.values()).sort((a, b) => b.timestamp - a.timestamp));
+    const merged = new Map<string, ConnectionRequest>();
+    [...resultsByQuery].reverse().forEach((results) => results.forEach((request, id) => merged.set(id, request)));
+    onChange(Array.from(merged.values()).sort((a, b) => b.timestamp - a.timestamp));
   };
 
-  const attach = (q: Query<DocumentData>) =>
-    onSnapshot(q, (snapshot) => {
+  const attach = (q: Query<DocumentData>) => {
+    const results = new Map<string, ConnectionRequest>();
+    resultsByQuery.push(results);
+    return onSnapshot(q, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'removed') {
           results.delete(change.doc.id);
@@ -118,10 +144,17 @@ export function subscribeToRequests(
         // A broadcast request the viewer sent themselves is already
         // covered by the "sent" query below — skip the duplicate.
         if (data.toUid === null && data.fromUid === uid) return;
+        // Skip broadcasts meant for the other organization type, e.g. one
+        // school's open request showing up for another school.
+        if (data.toUid === null) {
+          const audience: UserType = data.kind === 'offer' ? 'school' : 'community-partner';
+          if (audience !== userType) return;
+        }
         results.set(change.doc.id, toConnectionRequest(change.doc.id, data, uid));
       });
       emit();
     });
+  };
 
   const sentQuery = query(collection(db, REQUESTS_COLLECTION), where('fromUid', '==', uid));
   const receivedQuery = query(collection(db, REQUESTS_COLLECTION), where('toUid', '==', uid));
@@ -147,6 +180,10 @@ export async function createRequest(input: NewRequestInput): Promise<string> {
     availability: input.availability ?? null,
     // JSON round-trip drops undefined optional fields, which Firestore rejects.
     schoolRequestData: input.schoolRequestData ? JSON.parse(JSON.stringify(input.schoolRequestData)) : null,
+    kind: input.kind ?? 'request',
+    offeredItems: input.offeredItems ?? null,
+    fromUserType: input.fromUserType ?? null,
+    availableUntil: input.availableUntil ?? null,
     status: 'pending',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

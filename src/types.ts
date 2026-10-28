@@ -93,8 +93,18 @@ export interface SchoolResourceRequest {
   };
 }
 
+// A line item on a community partner's supply offer (src/Requests.tsx).
+export interface OfferedItem {
+  item: string;
+  quantity: number;
+}
+
 export interface ConnectionRequest {
   id: string;
+  // 'request': a school asking for supplies. 'offer': a community partner
+  // posting supplies it has available. Older documents have no kind and are
+  // treated as requests.
+  kind?: 'request' | 'offer';
   fromId: string;
   fromName: string;
   fromAvatar: string;
@@ -111,6 +121,9 @@ export interface ConnectionRequest {
   availability?: AvailabilitySlot[];
   isNew?: boolean;
   schoolRequestData?: SchoolResourceRequest;
+  offeredItems?: OfferedItem[];
+  respondedAt?: number; // when the request was approved/denied
+  isBroadcast?: boolean; // open to every school/partner rather than addressed to one
 }
 
 // A LinkedIn-style connection between two organizations (src/lib/connections.ts),

@@ -133,8 +133,10 @@ export interface SendMessageInput {
 
 /** Appends a message to a chat and updates the chat's lastMessage preview. */
 export async function sendMessage(chatId: string, input: SendMessageInput): Promise<void> {
+  // Firestore rejects undefined values, so drop unset optional fields.
+  const fields = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
   await addDoc(collection(db, CHATS_COLLECTION, chatId, MESSAGES_SUBCOLLECTION), {
-    ...input,
+    ...fields,
     createdAt: serverTimestamp(),
   });
   await updateDoc(doc(db, CHATS_COLLECTION, chatId), {

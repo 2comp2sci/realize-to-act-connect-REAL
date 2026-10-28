@@ -2,53 +2,40 @@ import React, { useState } from 'react';
 import { 
   Search, Check, X, MapPin, Package,
   Utensils, Shirt, Book, Library, Laptop, Home, Palette, Backpack,
-  FileText, ArrowRight, Eye, CheckCircle2, Filter
+  FileText, ArrowRight, Eye, CheckCircle2, Filter, Plus, MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { ConnectionRequest, User } from './types';
 import RequestDetailModal from './components/RequestDetailModal';
+import SupplyOfferForm from './components/SupplyOfferForm';
 import Tag from './components/Tag';
 import { respondToRequest, cancelRequest } from './lib/requests';
-import { ensureChat } from './lib/chats';
-import { connectOnApprovedRequest } from './lib/connections';
+import { acceptMatch, accepterDraft, describeMatchItems, matchChatId, requesterDraft } from './lib/matches';
 
 interface RequestsProps {
   connections: ConnectionRequest[];
   setConnections: React.Dispatch<React.SetStateAction<ConnectionRequest[]>>;
   user: User;
+  onOpenChat: (chatId: string, draftText?: string) => void;
 }
 
-export default function Requests({ connections, setConnections, user }: RequestsProps) {
+export default function Requests({ connections, setConnections, user, onOpenChat }: RequestsProps) {
+  const isPartner = user.type === 'community-partner';
+  const [showOfferForm, setShowOfferForm] = useState(false);
   const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequestForModal, setSelectedRequestForModal] = useState<ConnectionRequest | null>(null);
 
+  // Accepting makes a match: the request is approved (claiming it if it was
+  // a broadcast), a chat is opened with a starter message, and the user is
+  // taken straight to that conversation.
   const handleApprove = async (id: string) => {
     const connection = connections.find(c => c.id === id);
-    // Passing the current user as the "claim" attributes a broadcast
-    // request (toUid == null) to whoever accepted it, so it stops showing
-    // up as pending for every other partner. The Firestore onSnapshot
-    // listener in App.tsx pushes the update back down into `connections`.
-    await respondToRequest(id, 'approved', { uid: user.id, name: user.name, avatar: user.avatar || '' });
-
-    // Open up a chat thread with the other party now that the request is approved.
-    if (connection) {
-      await ensureChat(
-        user.id,
-        { name: user.name, title: user.contactName || '', avatar: user.avatar },
-        connection.fromId,
-        { name: connection.fromName, title: '', avatar: connection.fromAvatar }
-      );
-      // Organizations that exchange resources are automatically connected.
-      // A failure here shouldn't undo or block the approval itself.
-      await connectOnApprovedRequest(
-        { uid: user.id, name: user.name, avatar: user.avatar, type: user.type },
-        { uid: connection.fromId, name: connection.fromName, avatar: connection.fromAvatar },
-        id
-      ).catch(err => console.error('Auto-connect failed', err));
-    }
+    if (!connection) return;
+    const chatId = await acceptMatch(user, connection);
+    onOpenChat(chatId, accepterDraft(connection));
   };
 
   const handleDeny = async (id: string) => {
@@ -101,9 +88,21 @@ export default function Requests({ connections, setConnections, user }: Requests
           <span className="text-xs font-bold uppercase tracking-wider text-brand-primary">Request Management Center</span>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-brand-dark mt-1">Requests Management</h1>
           <p className="text-slate-500 text-sm mt-1">
-            Review and take action on incoming and outgoing supply requests across your educational network.
+            {isPartner
+              ? 'Post the supplies you have available and respond to requests from schools.'
+              : 'Review supply offers from community partners and track the requests you have sent.'}
           </p>
         </div>
+        {isPartner && (
+          <button
+            type="button"
+            onClick={() => setShowOfferForm(true)}
+            className="px-5 py-2.5 bg-brand-primary hover:bg-brand-dark text-white rounded-[5px] font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-none shrink-0"
+          >
+            <Plus size={15} />
+            <span>Post Available Supplies</span>
+          </button>
+        )}
       </header>
 
       {/* Main Content Area */}
@@ -132,7 +131,7 @@ export default function Requests({ connections, setConnections, user }: Requests
               activeTab === 'sent' ? "bg-white text-brand-primary shadow-xs" : "text-slate-500 hover:text-slate-800"
             )}
           >
-            <span>Sent Requests</span>
+            <span>{isPartner ? 'Posted Supplies & Sent' : 'Sent Requests'}</span>
             <span className={cn(
               "px-2 py-0.5 rounded-full text-[11px] font-bold",
               activeTab === 'sent' ? "bg-brand-primary/15 text-brand-primary" : "bg-slate-200 text-slate-600"
@@ -238,7 +237,8 @@ export default function Requests({ connections, setConnections, user }: Requests
                     </div>
                     
                     <div className="flex flex-wrap items-center gap-2 mt-2">
-                      <Tag label={`${conn.quantity} ${conn.item}`} variant="category" />
+                      {conn.kind === 'offer' && <Tag label="Supply Offer" variant="subtle" />}
+                      <Tag label={conn.offeredItems ? `${conn.quantity} items` : `${conn.quantity} ${conn.item}`} variant="category" />
                       {conn.distance !== 'N/A' && (
                         <span className="flex items-center gap-1 text-xs text-slate-500 font-medium">
                           <MapPin size={13} className="text-brand-primary" />
@@ -250,6 +250,17 @@ export default function Requests({ connections, setConnections, user }: Requests
                   </div>
                 </div>
                 
+                {conn.offeredItems && conn.offeredItems.length > 0 && (
+                  <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                    {conn.offeredItems.map((line, i) => (
+                      <div key={i} className="flex justify-between items-center px-2.5 py-1.5 rounded-[4px] bg-white border border-slate-200">
+                        <span className="text-slate-700 truncate pr-2">{line.item}</span>
+                        <span className="font-bold text-slate-900">{line.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {conn.description && (
                   <p className="text-xs text-slate-600 mb-4 leading-relaxed line-clamp-2">{conn.description}</p>
                 )}
@@ -285,7 +296,19 @@ export default function Requests({ connections, setConnections, user }: Requests
                   <span>View Details</span>
                 </button>
 
-                {conn.type === 'received' ? (
+                {conn.status === 'approved' ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenChat(
+                      matchChatId(user, conn),
+                      conn.type === 'sent' ? requesterDraft(conn.fromName) : undefined
+                    )}
+                    className="flex-1 py-2 px-3.5 rounded-[5px] bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-none"
+                  >
+                    <MessageSquare size={14} />
+                    <span>Message {conn.fromName}</span>
+                  </button>
+                ) : conn.type === 'received' ? (
                   <>
                     <button 
                       type="button"
@@ -293,7 +316,7 @@ export default function Requests({ connections, setConnections, user }: Requests
                       className="flex-1 py-2 px-3.5 rounded-[5px] bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-none"
                     >
                       <Check size={15} />
-                      <span>Approve</span>
+                      <span>{conn.kind === 'offer' ? 'Accept Offer' : 'Accept'}</span>
                     </button>
                     <button 
                       type="button"
@@ -311,7 +334,7 @@ export default function Requests({ connections, setConnections, user }: Requests
                     className="flex-1 py-2 px-3 rounded-[5px] hover:bg-red-50 text-slate-500 hover:text-red-600 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-none"
                   >
                     <X size={14} />
-                    <span>Cancel Request</span>
+                    <span>{conn.kind === 'offer' ? 'Remove Offer' : 'Cancel Request'}</span>
                   </button>
                 )}
               </div>
@@ -321,16 +344,24 @@ export default function Requests({ connections, setConnections, user }: Requests
           {filteredRequests.length === 0 && (
             <div className="col-span-full h-64 flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-[6px] text-slate-400 p-8 text-center">
               <Package size={44} className="mb-3 text-slate-300" />
-              <p className="font-semibold text-slate-700 mb-1">No pending {activeTab} requests</p>
+              <p className="font-semibold text-slate-700 mb-1">Nothing to see here</p>
               <p className="text-xs text-slate-400 max-w-sm">
-                {activeTab === 'sent' 
-                  ? "You have no active pending requests sent to community partners."
-                  : "There are no incoming requests waiting for your approval right now."}
+                {activeTab === 'sent'
+                  ? (isPartner
+                    ? 'Supplies you post and requests you send will appear here.'
+                    : 'Requests you send to community partners will appear here.')
+                  : (isPartner
+                    ? 'Supply requests from schools will appear here.'
+                    : 'Supply offers from community partners will appear here.')}
               </p>
             </div>
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showOfferForm && <SupplyOfferForm user={user} onClose={() => setShowOfferForm(false)} />}
+      </AnimatePresence>
 
       {/* Full Request Submission Detail Modal with the same level of detail */}
       <AnimatePresence>

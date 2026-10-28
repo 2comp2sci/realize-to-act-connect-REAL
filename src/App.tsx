@@ -8,21 +8,22 @@ import Documents from './Documents';
 import Messages from './Messages';
 import Profile from './Profile';
 import Search from './Search';
+import SchoolSearch from './SchoolSearch';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import ProfileSetup from './components/ProfileSetup';
 import { User, UserType, ConnectionRequest, Chat, Document } from './types';
-import { MOCK_USER } from './mockData';
 import { auth } from './lib/firebase';
 import { getUserProfile } from './lib/users';
 import { subscribeToRequests } from './lib/requests';
 import { subscribeToChats } from './lib/chats';
 import { subscribeToDocuments } from './lib/documents';
 import { saveOrganizationProfile, skipProfileSetup } from './lib/profiles';
+import { defaultAvatar, EMPTY_AVAILABILITY } from './lib/utils';
 
 // Builds the in-app User object for a signed-in Firebase uid, layering the
 // Firestore "users/{uid}" profile (org name, availability, etc.) on top of
-// sane defaults so the UI has something to render even for a brand-new,
-// mostly-empty profile.
+// empty defaults so the UI can render a brand-new, mostly-empty profile
+// without showing placeholder data.
 async function loadUser(uid: string, fallbackType: UserType): Promise<User> {
   const profile = await getUserProfile(uid);
   const localCompleted = typeof window !== 'undefined' ? localStorage.getItem(`setupCompleted_${uid}`) : null;
@@ -38,20 +39,20 @@ async function loadUser(uid: string, fallbackType: UserType): Promise<User> {
   }
 
   const effectiveType = profile.type ?? fallbackType;
-  const defaultName = effectiveType === 'community-partner'
-    ? (uid === 'demo-partner-user' ? 'Hope Feeling Foundation' : 'Community Partner Organization')
-    : MOCK_USER.name;
+  const name = profile.name || (effectiveType === 'community-partner' ? 'Community Partner Organization' : 'School Organization');
 
   return {
-    ...MOCK_USER,
-    name: profile.name || (uid.startsWith('demo-') ? (effectiveType === 'community-partner' ? 'Hope Feeling Foundation' : 'Midland Elementary School') : defaultName),
     ...profile,
     id: uid,
+    name,
     type: effectiveType,
+    email: profile.email || auth.currentUser?.email || '',
+    avatar: profile.avatar || defaultAvatar(name),
+    availability: profile.availability && profile.availability.length > 0 ? profile.availability : EMPTY_AVAILABILITY,
     setupCompletedAt: profile.setupCompletedAt || localCompleted || undefined,
     setupSkippedAt: profile.setupSkippedAt || localSkipped || undefined,
     profileAnswers: parsedAnswers,
-    location: profile.location || localLocation || MOCK_USER.location,
+    location: profile.location || localLocation || '',
   };
 }
 
@@ -102,7 +103,7 @@ export default function App() {
       setDocuments([]);
       return;
     }
-    const unsubscribeRequests = subscribeToRequests(user.id, setConnections);
+    const unsubscribeRequests = subscribeToRequests(user.id, user.type, setConnections);
     const unsubscribeChats = subscribeToChats(user.id, setChats);
     const unsubscribeDocuments = subscribeToDocuments(user.id, setDocuments);
     return () => {
@@ -110,7 +111,7 @@ export default function App() {
       unsubscribeChats();
       unsubscribeDocuments();
     };
-  }, [user?.id]);
+  }, [user?.id, user?.type]);
 
   const handleLogin = async (type: UserType, uid: string) => {
     const loadedUser = await loadUser(uid, type);
@@ -139,8 +140,11 @@ export default function App() {
     await skipProfileSetup(user.id);
   };
 
-  const navigateToChat = (chatId: string) => {
+  // Opens a conversation, optionally pre-filling the composer (e.g. with a
+  // placeholder reply after a match is made).
+  const openChat = (chatId: string, draftText?: string) => {
     setSelectedChatId(chatId);
+    if (draftText) setDraftMessage({ text: draftText });
     setActiveTab('messages');
   };
 
@@ -195,14 +199,14 @@ export default function App() {
       activeTab={activeTab} 
       setActiveTab={setActiveTab} 
       onLogout={handleLogout}
-      actionsNeededRead={actionsNeededRead}
-      setActionsNeededRead={setActionsNeededRead}
+      connections={connections}
+      onOpenChat={openChat}
     >
       {activeTab === 'dashboard' && (
         <Dashboard 
           user={user} 
           onNavigate={setActiveTab} 
-          onNavigateToChat={navigateToChat}
+          onOpenChat={openChat}
           actionsNeededRead={actionsNeededRead}
           setActionsNeededRead={setActionsNeededRead}
           connections={connections}
@@ -219,6 +223,7 @@ export default function App() {
           connections={connections} 
           setConnections={setConnections} 
           user={user}
+          onOpenChat={openChat}
         />
       )}
       {activeTab === 'messages' && (
@@ -243,17 +248,26 @@ export default function App() {
         />
       )}
       {activeTab === 'search' && (
-        <Search 
-          connections={connections}
-          setConnections={setConnections}
-          user={user}
-        />
+        user.type === 'community-partner' ? (
+          <SchoolSearch
+            connections={connections}
+            user={user}
+            onOpenChat={openChat}
+          />
+        ) : (
+          <Search 
+            connections={connections}
+            setConnections={setConnections}
+            user={user}
+          />
+        )
       )}
       {activeTab === 'profile' && (
         <Profile 
           user={user} 
           onLogout={handleLogout} 
           connections={connections}
+          chatCount={chats.length}
           onUpdateUser={handleUpdateUser}
         />
       )}

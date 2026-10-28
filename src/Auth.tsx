@@ -2,18 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Eye, EyeOff, Check, ArrowRight, ArrowLeft,
-  School, Heart, Apple, X, AlertTriangle, Sparkles
+  School, Heart, X, AlertTriangle, Sparkles
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { UserType } from './types';
 import AuthCarousel from './components/AuthCarousel';
-import { auth, db, googleProvider } from './lib/firebase';
+import { auth, db, googleProvider, microsoftProvider } from './lib/firebase';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
   sendPasswordResetEmail,
-  OAuthProvider,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
@@ -33,6 +32,9 @@ const getFriendlyError = (code: string) => {
     case 'auth/popup-blocked': return 'Please allow popups for this site to connect your account.';
     case 'auth/operation-not-allowed': return 'This sign-in method is not enabled yet. Please use email or Google.';
     case 'auth/invalid-credential': return 'Invalid email or password.';
+    case 'auth/account-exists-with-different-credential': return 'An account with this email already exists. Sign in with the method you used originally.';
+    case 'auth/unauthorized-domain': return 'Sign-in is not enabled for this domain yet. Please contact the Realize to Act team.';
+    case 'auth/cancelled-popup-request': return 'Sign in was cancelled.';
     default: return 'Something went wrong. Please try again.';
   }
 };
@@ -127,13 +129,12 @@ export default function Auth({ onLogin }: AuthProps) {
     }
   };
 
-  // Google uses the project's configured Firebase provider; Apple requires the
-  // "apple.com" provider to be enabled in Firebase Authentication.
-  const handleOAuth = async (provider: 'google' | 'apple') => {
+  // Both providers must be enabled in Firebase Authentication (see src/lib/firebase.ts).
+  const handleOAuth = async (provider: 'google' | 'microsoft') => {
     setError('');
     try {
       setIsAuthenticating(true);
-      const result = await signInWithPopup(auth, provider === 'google' ? googleProvider : new OAuthProvider('apple.com'));
+      const result = await signInWithPopup(auth, provider === 'google' ? googleProvider : microsoftProvider);
       const userRef = doc(db, 'users', result.user.uid);
       const userDoc = await getDoc(userRef);
       if (!userDoc.exists()) {
@@ -357,12 +358,17 @@ export default function Auth({ onLogin }: AuthProps) {
                       Google
                     </button>
                     <button 
-                      onClick={() => handleOAuth('apple')}
+                      onClick={() => handleOAuth('microsoft')}
                       disabled={isAuthenticating}
                       className="flex items-center justify-center gap-3 px-4 py-3 border border-slate-200 rounded-[5px] hover:bg-slate-50 transition-all font-medium text-slate-700 text-sm disabled:opacity-50"
                     >
-                      <Apple size={18} className="fill-current text-black" />
-                      Apple ID
+                      <svg className="w-4 h-4" viewBox="0 0 23 23">
+                        <path fill="#F25022" d="M1 1h10v10H1z"/>
+                        <path fill="#7FBA00" d="M12 1h10v10H12z"/>
+                        <path fill="#00A4EF" d="M1 12h10v10H1z"/>
+                        <path fill="#FFB900" d="M12 12h10v10H12z"/>
+                      </svg>
+                      Microsoft
                     </button>
                   </div>
                 </motion.div>

@@ -5,7 +5,7 @@ import {
   FileText, CheckCircle2, ArrowRight, X, 
   School, Heart, Mail, Phone, Check, AlertCircle, ArrowLeft, Lock
 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, EMPTY_AVAILABILITY } from '../lib/utils';
 import { User, AvailabilitySlot } from '../types';
 import AuthCarousel from './AuthCarousel';
 
@@ -30,24 +30,16 @@ export default function ProfileSetup({ user, onComplete, onSkip }: ProfileSetupP
   const [contactName, setContactName] = useState(user.contactName || '');
   const [contactRole, setContactRole] = useState(user.contactRole || '');
   const [phone, setPhone] = useState(user.phone || '');
-  const [location, setLocation] = useState(user.location || 'Midland, MI');
+  const [location, setLocation] = useState(user.location || '');
   const [about, setAbout] = useState(user.about || '');
   
   // Drop-off specifications
-  const [dropOffLocation, setDropOffLocation] = useState(
-    user.dropOffLocation || (user.type === 'school' ? 'Main Entrance, Reception Desk Room 101' : 'Community Donation Center Entrance')
-  );
-  const [dropOffDetails, setDropOffDetails] = useState(
-    user.dropOffDetails || 'Ring buzzer at Door #2. Staff or volunteer coordinator will greet at reception and assist unloading.'
-  );
+  const [dropOffLocation, setDropOffLocation] = useState(user.dropOffLocation || '');
+  const [dropOffDetails, setDropOffDetails] = useState(user.dropOffDetails || '');
   const [needDropOffAssistance, setNeedDropOffAssistance] = useState(user.needDropOffAssistance || false);
   
   // Team Collaboration Emails
-  const [teamEmails, setTeamEmails] = useState<string[]>(
-    user.teamEmails && user.teamEmails.length > 0 
-      ? user.teamEmails 
-      : ['admin@organization.org', 'coordinator@organization.org']
-  );
+  const [teamEmails, setTeamEmails] = useState<string[]>(user.teamEmails ?? []);
   const [newTeamEmail, setNewTeamEmail] = useState('');
 
   // Drop-off availability schedule
@@ -55,15 +47,7 @@ export default function ProfileSetup({ user, onComplete, onSkip }: ProfileSetupP
     user.allowAvailabilityView !== undefined ? user.allowAvailabilityView : true
   );
   const [availabilitySlots, setAvailabilitySlots] = useState<AvailabilitySlot[]>(
-    user.availability && user.availability.length > 0
-      ? user.availability
-      : [
-          { day: 'MON', slots: ['8:00 AM', '9:00 AM', '1:00 PM', '2:00 PM'] },
-          { day: 'TUES', slots: ['9:00 AM', '10:00 AM'] },
-          { day: 'WED', slots: ['8:00 AM', '9:00 AM', '1:00 PM', '2:00 PM'] },
-          { day: 'THURS', slots: ['9:00 AM', '10:00 AM'] },
-          { day: 'FRI', slots: ['2:00 PM', '3:00 PM'] },
-        ]
+    user.availability && user.availability.length > 0 ? user.availability : EMPTY_AVAILABILITY
   );
 
   const [isScrolling, setIsScrolling] = useState(false);
@@ -146,9 +130,7 @@ export default function ProfileSetup({ user, onComplete, onSkip }: ProfileSetupP
       contactRole: contactRole.trim() || user.contactRole,
       phone: phone.trim() || user.phone,
       location: location.trim() || user.location,
-      about: about.trim() || (user.type === 'school' 
-        ? 'Dedicated to providing equitable access and essential supplies for every student in our district.'
-        : 'Our mission is to share hope and provide vital resources to uplift youth and local families.'),
+      about: about.trim() || user.about,
       dropOffLocation: dropOffLocation.trim(),
       dropOffDetails: dropOffDetails.trim(),
       teamEmails,

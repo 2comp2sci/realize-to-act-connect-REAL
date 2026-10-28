@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, OAuthProvider } from 'firebase/auth';
 import { initializeFirestore } from 'firebase/firestore';
 
 // Firebase web config for the realize-to-act-connect project. These values
@@ -28,3 +28,9 @@ export const db = initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true,
 });
 export const googleProvider = new GoogleAuthProvider();
+
+// Microsoft (personal and work/school accounts). Requires the "Microsoft"
+// provider to be enabled in Firebase Authentication with an Azure app
+// registration whose redirect URI is https://<authDomain>/__/auth/handler.
+export const microsoftProvider = new OAuthProvider('microsoft.com');
+microsoftProvider.setCustomParameters({ prompt: 'select_account' });

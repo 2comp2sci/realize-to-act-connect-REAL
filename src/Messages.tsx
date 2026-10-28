@@ -53,12 +53,12 @@ export default function Messages({
   const [connectionSearch, setConnectionSearch] = useState('');
   const [showMenu, setShowMenu] = useState(false);
 
-  const approvedChatNames = connections
-    .filter(c => c.status === 'approved')
-    .map(c => c.fromName);
+  const approvedConnectionsAll = connections.filter(c => c.status === 'approved');
+  const approvedUids = new Set(approvedConnectionsAll.map(c => c.fromId));
+  const approvedChatNames = approvedConnectionsAll.map(c => c.fromName);
 
   const allApprovedChats = chats
-    .filter(chat => approvedChatNames.includes(chat.participantName))
+    .filter(chat => (chat.participantUid && approvedUids.has(chat.participantUid)) || approvedChatNames.includes(chat.participantName))
     .sort((a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0));
 
   const formatTitle = (title: string) => {
@@ -120,42 +120,6 @@ export default function Messages({
     }
   }, [draftMessage, setDraftMessage]);
 
-  // Apply Network Center specific pre-fill
-  React.useEffect(() => {
-    if (activeChat?.participantName === 'Network Center' && activeChat.messages?.length === 2 && !message && !meetingNoteDraft) {
-      setMessage("Great, thank you! Since the time is confirmed for 2:00 PM, let's meet at the Main Entrance. I'll have a few staff members there to help unload.");
-      setMeetingNoteDraft("Main Entrance");
-    }
-    
-    // Apply Hope Feeling Foundation specific pre-fill for recently approved
-    if (activeChat?.participantName === 'Hope Feeling Foundation' && activeChat.isRecentlyApproved && activeChat.messages?.length === 0 && !message) {
-      const intro = `Hi Hope Feeling Foundation, are the 200 Biology Textbooks still available? We'd love to coordinate a drop off!`;
-      const overlapping = [
-        'Mon, 03/10/26: 8:00 AM', 
-        'Mon, 03/10/26: 9:00 AM', 
-        'Wed, 03/12/26: 8:00 AM', 
-        'Wed, 03/12/26: 9:00 AM'
-      ];
-      setMessage(`${intro} Based on our profiles, we both have availability during these times. Would any of these work for you?`);
-      setIsSuggestedTimeDraft(true);
-      setSuggestedTimesDraft(overlapping);
-    }
-
-    // Apply The Woman's Shelter specific pre-fill for recently approved
-    if (activeChat?.participantName === "The Woman's Shelter" && activeChat.isRecentlyApproved && activeChat.messages?.length === 0 && !message) {
-      const intro = `Hi The Woman's Shelter, are the 200 Backpacks still available? We'd love to coordinate a drop off!`;
-      const overlapping = [
-        'Mon, 03/10/26: 8:00 AM', 
-        'Mon, 03/10/26: 9:00 AM', 
-        'Wed, 03/12/26: 8:00 AM', 
-        'Wed, 03/12/26: 9:00 AM'
-      ];
-      setMessage(`${intro} Based on our profiles, we both have availability during these times. Would any of these work for you?`);
-      setIsSuggestedTimeDraft(true);
-      setSuggestedTimesDraft(overlapping);
-    }
-  }, [activeChatId, activeChat?.participantName, activeChat?.messages?.length, activeChat?.isRecentlyApproved]);
-
   // Stream the active chat's messages from Firestore. Only the open
   // conversation is subscribed (not every chat in the sidebar) to keep
   // reads proportional to what's actually being viewed.
@@ -172,8 +136,8 @@ export default function Messages({
     c.fromName.toLowerCase().includes(connectionSearch.toLowerCase())
   );
 
-  const handleStartChat = (connectionName: string) => {
-    const existingChat = chats.find(c => c.participantName === connectionName);
+  const handleStartChat = (connection: ConnectionRequest) => {
+    const existingChat = chats.find(c => c.participantUid === connection.fromId || c.participantName === connection.fromName);
     if (existingChat) {
       setSelectedChatId(existingChat.id);
     }
@@ -324,19 +288,11 @@ export default function Messages({
             <div className={cn("flex-1 overflow-y-auto p-8", !activeChat.messages || activeChat.messages.length === 0 ? "flex items-center justify-center" : "space-y-6")}>
               {activeChat.messages && activeChat.messages.length > 0 ? (
                 <>
-                  {activeChat.timeAgo === '1 day ago' && (
-                    <div className="flex justify-center mb-6">
-                      <span className="text-[10px] font-bold text-slate-400 tracking-widest">
-                        Yesterday 10:00 AM
-                      </span>
-                    </div>
-                  )}
-                  
                   {activeChat.messages.map((msg) => (
-                    <div key={msg.id} className={cn("flex w-full mb-6", msg.senderId === 'user-1' ? "justify-end" : "justify-start")}>
+                    <div key={msg.id} className={cn("flex w-full mb-6", msg.senderId === user.id ? "justify-end" : "justify-start")}>
                       <div className={cn(
                         "max-w-[80%] rounded-[5px] p-6",
-                        msg.senderId === 'user-1' ? "bg-white border border-slate-200" : "bg-slate-50"
+                        msg.senderId === user.id ? "bg-white border border-slate-200" : "bg-slate-50"
                       )}>
                         <p className="text-sm text-slate-700 leading-relaxed mb-4">{msg.text}</p>
                         
@@ -345,23 +301,17 @@ export default function Messages({
                             <span className="text-xs font-bold text-brand-dark block mb-3">Suggested Drop-off:</span>
                             <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-thin cursor-grab active:cursor-grabbing">
                               <div className="flex gap-2 min-w-max pr-4">
-                                {(msg.suggestedTimes && msg.suggestedTimes.length > 0) ? (
-                                  msg.suggestedTimes.map((time, idx) => (
-                                    <button 
-                                      key={idx} 
-                                      className={cn(
-                                        "flex items-center gap-2 px-4 py-2 rounded-[5px] text-xs font-bold border transition-all whitespace-nowrap",
-                                        "bg-white text-slate-600 border-slate-200 hover:border-brand-primary hover:text-brand-primary hover:bg-brand-secondary/10"
-                                      )}
-                                    >
-                                      {time}
-                                    </button>
-                                  ))
-                                ) : (
-                                  <button className="flex items-center gap-2 px-4 py-2 bg-white text-slate-600 border-slate-200 rounded-[5px] text-xs font-bold border hover:border-brand-primary hover:text-brand-primary hover:bg-brand-secondary/10 transition-all whitespace-nowrap">
-                                    Mon, 03/10/26: 9:00 AM
+                                {(msg.suggestedTimes ?? []).map((time, idx) => (
+                                  <button 
+                                    key={idx} 
+                                    className={cn(
+                                      "flex items-center gap-2 px-4 py-2 rounded-[5px] text-xs font-bold border transition-all whitespace-nowrap",
+                                      "bg-white text-slate-600 border-slate-200 hover:border-brand-primary hover:text-brand-primary hover:bg-brand-secondary/10"
+                                    )}
+                                  >
+                                    {time}
                                   </button>
-                                )}
+                                ))}
                               </div>
                             </div>
                           </div>
@@ -384,9 +334,7 @@ export default function Messages({
                             <span className="text-xs font-bold text-brand-dark block mb-3">Meeting Notes:</span>
                             <div className="p-3 bg-brand-secondary/10 border border-brand-primary/10 rounded-[5px]">
                               <p className="text-xs text-brand-dark font-medium leading-relaxed">
-                                {msg.text.includes("East Wing Entrance") ? "Meet at the East Wing Entrance. Student leaders will be there to help unload." : 
-                                 msg.text.includes("Main Entrance") ? "Meet at the Main Entrance. Staff members will be there to help unload." : 
-                                 msg.meetingNote}
+                                {msg.meetingNote}
                               </p>
                             </div>
                           </div>
@@ -406,7 +354,7 @@ export default function Messages({
             </div>
 
             <div className="p-6 border-t border-slate-100">
-              {meetingNoteDraft && activeChat?.participantName === 'Network Center' && (
+              {meetingNoteDraft && (
                 <div className="mb-4 p-4 bg-brand-secondary/10 rounded-[5px] border border-brand-primary/10 animate-in slide-in-from-bottom-2">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-brand-primary flex items-center gap-2">
@@ -487,7 +435,8 @@ export default function Messages({
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             <MessageSquare size={48} className="mb-4 opacity-20" />
-            <p>Select a conversation to start messaging</p>
+            <p className="font-semibold text-slate-500">Nothing to see here</p>
+            <p className="text-sm mt-1">Conversations start automatically when one of your requests is matched.</p>
           </div>
         )}
       </div>
@@ -536,7 +485,7 @@ export default function Messages({
                     return (
                       <button
                         key={conn.id}
-                        onClick={() => handleStartChat(conn.fromName)}
+                        onClick={() => handleStartChat(conn)}
                         className="w-full flex items-center gap-3 p-3 rounded-[5px] hover:bg-slate-50 transition-all text-left"
                       >
                         <img src={conn.fromAvatar} alt={conn.fromName} className="w-10 h-10 rounded-full object-cover" />

@@ -12,10 +12,11 @@ interface ProfileProps {
   user: User;
   onLogout: () => void;
   connections: ConnectionRequest[];
+  chatCount: number;
   onUpdateUser: (user: User) => void;
 }
 
-export default function Profile({ user, onLogout, connections, onUpdateUser }: ProfileProps) {
+export default function Profile({ user, onLogout, connections, chatCount, onUpdateUser }: ProfileProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState<string | null>(null);
   const [about, setAbout] = useState(user.about || '');
@@ -27,9 +28,7 @@ export default function Profile({ user, onLogout, connections, onUpdateUser }: P
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const [teamMembers, setTeamMembers] = useState([
     { email: user.email, role: 'Owner', isPrimary: true, status: 'Active' },
-    ...(user.teamEmails && user.teamEmails.length > 0
-      ? user.teamEmails.map(email => ({ email, role: 'Admin', isPrimary: false, status: 'Invited' }))
-      : [{ email: 'admin@school.edu', role: 'Admin', isPrimary: false, status: 'Invited' }])
+    ...(user.teamEmails ?? []).map(email => ({ email, role: 'Admin', isPrimary: false, status: 'Invited' }))
   ]);
   const [newMemberEmail, setNewMemberEmail] = useState('');
 
@@ -41,9 +40,9 @@ export default function Profile({ user, onLogout, connections, onUpdateUser }: P
   });
 
   const stats = [
-    { label: 'Connection Requests', value: connections.filter(c => c.status === 'pending').length.toString(), icon: Users },
-    { label: 'Sent Messages', value: '12', icon: MessageSquare }, // Mocked for now as we don't track total sent messages globally
-    { label: 'Active Connections', value: connections.filter(c => c.status === 'approved').length.toString(), icon: Activity },
+    { label: 'Pending Requests', value: connections.filter(c => c.status === 'pending').length.toString(), icon: Users },
+    { label: 'Conversations', value: chatCount.toString(), icon: MessageSquare },
+    { label: 'Matches', value: connections.filter(c => c.status === 'approved').length.toString(), icon: Activity },
   ];
 
   const toggleSlot = (dayIndex: number, slot: string) => {
@@ -123,7 +122,7 @@ export default function Profile({ user, onLogout, connections, onUpdateUser }: P
             </div>
 
             <div className="flex items-center gap-6 mb-8">
-              <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-brand-secondary">
+              <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-brand-secondary shrink-0">
                 <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               </div>
               <div>
@@ -131,11 +130,11 @@ export default function Profile({ user, onLogout, connections, onUpdateUser }: P
                 <div className="space-y-1 mt-2">
                   <div className="flex items-center gap-2 text-sm text-slate-500">
                     <MapPin size={16} className="text-brand-primary" />
-                    {user.location}
+                    {user.location || 'No location listed'}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-500">
                     <UserIcon size={16} className="text-brand-primary" />
-                    {user.contactName}
+                    {user.contactName || 'No contact listed'}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-500">
                     <Mail size={16} className="text-brand-primary" />

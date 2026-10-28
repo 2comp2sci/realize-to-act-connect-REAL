@@ -31,7 +31,12 @@ documented at the top of those files and in `firestore.rules`.
 ### One-time Firebase project setup
 --done already on MM laptop (mine)
 1. Create a project at https://console.firebase.google.com, then enable
-   **Authentication** (Email/Password + Google providers) and **Firestore**.
+   **Authentication** (Email/Password, Google, and Microsoft providers) and
+   **Firestore**. For Microsoft, register an app in the Azure portal (Microsoft
+   Entra ID > App registrations, supported account types: "any organizational
+   directory and personal Microsoft accounts"), add the redirect URI
+   `https://<authDomain>/__/auth/handler` shown in the Firebase Microsoft
+   provider panel, and paste the app's client ID and a client secret there.
 2. In Project Settings > General > "Your apps", add a Web app and copy its
    config values into a `.env.local` (see `.env.example` for the required
    `VITE_FIREBASE_*` keys).

@@ -7,18 +7,16 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from './lib/utils';
-import { MOCK_CONNECTIONS, MOCK_DOCUMENTS, MOCK_SUGGESTED_MATCHES } from './mockData';
 import { User, ConnectionRequest, Document, Chat } from './types';
 import Tag from './components/Tag';
 import { respondToRequest } from './lib/requests';
-import { ensureChat } from './lib/chats';
-import { connectOnApprovedRequest } from './lib/connections';
+import { acceptMatch, accepterDraft, describeMatchItems } from './lib/matches';
 import { createDocument } from './lib/documents';
 
 interface DashboardProps {
   user: User;
   onNavigate: (tab: string) => void;
-  onNavigateToChat: (chatId: string) => void;
+  onOpenChat: (chatId: string, draftText?: string) => void;
   actionsNeededRead: boolean;
   setActionsNeededRead: (read: boolean) => void;
   connections: ConnectionRequest[];
@@ -31,33 +29,26 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ 
-  user, onNavigate, onNavigateToChat,
+  user, onNavigate, onOpenChat,
   actionsNeededRead, setActionsNeededRead,
   connections, setConnections,
   documents, setDocuments,
   lastActionTime, updateLastAction,
   setChats
 }: DashboardProps) {
-  const pendingConnections = connections.filter(c => c.status === 'pending' && c.type === 'received');
+  // Requests addressed directly to the user need a response; open broadcasts
+  // from the other side of the network (offers for schools, requests for
+  // community partners) are suggested instead.
+  const pendingConnections = connections.filter(c => c.status === 'pending' && c.type === 'received' && !c.isBroadcast);
   const pendingDocs = documents.filter(d => d.status === 'pending');
+  const suggestedMatches = connections
+    .filter(c => c.type === 'received' && c.status === 'pending' && c.isBroadcast)
+    .slice(0, 4);
 
   const handleApprove = async (id: string) => {
     const connection = connections.find(c => c.id === id);
     if (connection) {
-      await respondToRequest(id, 'approved', { uid: user.id, name: user.name, avatar: user.avatar || '' });
-      await ensureChat(
-        user.id,
-        { name: user.name, title: user.contactName || '', avatar: user.avatar },
-        connection.fromId,
-        { name: connection.fromName, title: '', avatar: connection.fromAvatar }
-      );
-      // Organizations that exchange resources are automatically connected.
-      // A failure here shouldn't undo or block the approval itself.
-      await connectOnApprovedRequest(
-        { uid: user.id, name: user.name, avatar: user.avatar, type: user.type },
-        { uid: connection.fromId, name: connection.fromName, avatar: connection.fromAvatar },
-        id
-      ).catch(err => console.error('Auto-connect failed', err));
+      const chatId = await acceptMatch(user, connection);
       updateLastAction();
 
       // Add to pending signatures — the documents subscription in App.tsx
@@ -70,8 +61,11 @@ export default function Dashboard({
         fromName: connection.fromName,
         toName: user.name,
         dueDate: 'Due in 7 days',
-        itemDescription: `approved ${connection.quantity} ${connection.item}`,
+        itemDescription: `approved ${describeMatchItems(connection)}`,
       }).catch(err => console.error('Could not create acknowledgement letter', err));
+
+      // Send the user straight to the new conversation to start coordinating.
+      onOpenChat(chatId, accepterDraft(connection));
     }
   };
 
@@ -138,11 +132,11 @@ export default function Dashboard({
                     )}>
                       {actionsNeededRead 
                         ? "No actions needed" 
-                        : `Respond to your ${pendingConnections.length} new connection requests`
+                        : `Respond to your ${pendingConnections.length} new ${pendingConnections.length === 1 ? 'request' : 'requests'}`
                       }
                     </span>
                   </div>
-                  <span className="text-xs text-slate-400">50 mins ago</span>
+                  <span className="text-xs text-slate-400">{pendingConnections[0].timeAgo}</span>
                 </div>
                 <p className={cn(
                   "text-sm ml-4 transition-colors",
@@ -150,7 +144,7 @@ export default function Dashboard({
                 )}>
                   {actionsNeededRead 
                     ? "Your dashboard is up to date." 
-                    : `${pendingConnections.map(c => c.fromName).join(' and ')} have taken interest in your organization`
+                    : `${Array.from(new Set(pendingConnections.map(c => c.fromName))).join(', ')} ${pendingConnections.length === 1 ? 'is' : 'are'} waiting on your response`
                   }
                 </p>
               </div>
@@ -166,42 +160,56 @@ export default function Dashboard({
             <div className="flex justify-between items-center mb-6">
               <div>
                 <h2 className="text-xl font-serif font-bold text-brand-dark mb-1">Suggested Matches</h2>
-                <p className="text-sm text-slate-500">Based on your needs and location, these partners might be a good fit.</p>
+                <p className="text-sm text-slate-500">
+                  {user.type === 'school'
+                    ? 'Supplies community partners currently have available.'
+                    : 'Open supply requests from schools you could help fulfill.'}
+                </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {MOCK_SUGGESTED_MATCHES.map((match) => (
-                <div 
-                  key={match.id} 
-                  onClick={() => onNavigate('search')}
-                  className="p-4 rounded-[5px] border border-slate-100 hover:border-brand-primary/20 transition-all flex gap-4 bg-slate-50/30 cursor-pointer group"
-                >
-                  <img src={match.avatar} alt={match.name} className="w-12 h-12 rounded-[5px] object-cover" />
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-bold text-brand-dark group-hover:text-brand-dark truncate">{match.name}</h3>
-                    <p className="text-[10px] text-slate-500 mb-2 truncate">{match.description}</p>
-                    <div className="flex flex-col gap-2">
+            {suggestedMatches.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {suggestedMatches.map((match) => (
+                  <div 
+                    key={match.id} 
+                    onClick={() => onNavigate(user.type === 'school' ? 'requests' : 'search')}
+                    className="p-4 rounded-[5px] border border-slate-100 hover:border-brand-primary/20 transition-all flex gap-4 bg-slate-50/30 cursor-pointer group"
+                  >
+                    <img src={match.fromAvatar} alt={match.fromName} className="w-12 h-12 rounded-[5px] object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-bold text-brand-dark group-hover:text-brand-dark truncate">{match.fromName}</h3>
+                      <p className="text-[10px] text-slate-500 mb-2 truncate">{match.description}</p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Tag label={`${match.quantity} ${match.item}`} variant="category" size="sm" />
-                        <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                          <MapPin size={12} className="text-brand-primary" />
-                          {match.distance}
-                        </span>
+                        <Tag label={describeMatchItems(match)} variant="category" size="sm" />
+                        {match.distance !== 'N/A' && (
+                          <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                            <MapPin size={12} className="text-brand-primary" />
+                            {match.distance}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="h-32 flex items-center justify-center border border-dashed border-slate-200 rounded-[5px] text-slate-400 text-sm text-center px-4">
+                Nothing to see here yet. Suggested matches will appear as {user.type === 'school' ? 'community partners post available supplies' : 'schools post supply requests'}.
+              </div>
+            )}
           </section>
 
           {/* Recent Connections Requests */}
           <section className="bg-white rounded-[5px] p-8 shadow-none border border-slate-100">
             <div className="flex justify-between items-center mb-6">
               <div>
-                <h2 className="text-xl font-bold text-brand-dark mb-1">Recent Connections Requests</h2>
-                <p className="text-sm text-slate-500">View and manage all your community partner connections requests.</p>
+                <h2 className="text-xl font-bold text-brand-dark mb-1">Recent Requests</h2>
+                <p className="text-sm text-slate-500">
+                  {user.type === 'school'
+                    ? 'Respond to supply offers from community partners.'
+                    : 'Respond to supply requests from schools.'}
+                </p>
               </div>
             </div>
 
@@ -219,42 +227,40 @@ export default function Dashboard({
                       </div>
                       <p className="text-xs text-slate-500 line-clamp-2 mb-3 leading-relaxed">{conn.description}</p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Tag label={`${conn.quantity} ${conn.item}`} variant="category" size="sm" />
-                        <span className="flex items-center gap-1 text-xs text-slate-500 font-medium">
-                          <MapPin size={12} className="text-brand-primary" />
-                          {conn.distance}
-                        </span>
+                        <Tag label={describeMatchItems(conn)} variant="category" size="sm" />
+                        {conn.distance !== 'N/A' && (
+                          <span className="flex items-center gap-1 text-xs text-slate-500 font-medium">
+                            <MapPin size={12} className="text-brand-primary" />
+                            {conn.distance}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex flex-col items-end justify-between sm:w-32">
                       <span className="text-xs text-slate-400 whitespace-nowrap">{conn.timeAgo}</span>
                       <div className="flex gap-2 mt-2">
-                        {conn.fromName !== 'Youth Empowerment Fund' && (
-                          <>
-                            <button 
-                              onClick={() => handleApprove(conn.id)}
-                              className="px-3 py-1.5 bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold rounded-[5px] transition-all flex items-center gap-1 cursor-pointer shadow-none"
-                              title="Approve request"
-                            >
-                              <Check size={14} />
-                              <span>Approve</span>
-                            </button>
-                            <button 
-                              onClick={() => handleReject(conn.id)}
-                              className="px-2.5 py-1.5 border border-slate-200 hover:border-red-200 text-slate-600 hover:text-red-600 hover:bg-red-50/60 text-xs font-semibold rounded-[5px] transition-all cursor-pointer shadow-none"
-                              title="Deny request"
-                            >
-                              <X size={14} />
-                            </button>
-                          </>
-                        )}
+                        <button 
+                          onClick={() => handleApprove(conn.id)}
+                          className="px-3 py-1.5 bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold rounded-[5px] transition-all flex items-center gap-1 cursor-pointer shadow-none"
+                          title={conn.kind === 'offer' ? 'Accept offer' : 'Accept request'}
+                        >
+                          <Check size={14} />
+                          <span>Accept</span>
+                        </button>
+                        <button 
+                          onClick={() => handleReject(conn.id)}
+                          className="px-2.5 py-1.5 border border-slate-200 hover:border-red-200 text-slate-600 hover:text-red-600 hover:bg-red-50/60 text-xs font-semibold rounded-[5px] transition-all cursor-pointer shadow-none"
+                          title="Decline"
+                        >
+                          <X size={14} />
+                        </button>
                       </div>
                     </div>
                   </div>
                 ))
               ) : (
                 <div className="h-32 flex items-center justify-center border border-dashed border-slate-200 rounded-[5px] text-slate-400 text-sm">
-                  There are no current connection requests.
+                  Nothing to see here. New requests will appear here.
                 </div>
               )}
             </div>
@@ -302,6 +308,11 @@ export default function Dashboard({
             </div>
             <p className="text-sm text-slate-500 mb-8">Indicate when you have received items from a community partner.</p>
 
+            {pendingDocs.length === 0 && (
+              <div className="h-24 flex items-center justify-center border border-dashed border-slate-200 rounded-[5px] text-slate-400 text-sm">
+                Nothing to see here.
+              </div>
+            )}
             <div className="divide-y divide-slate-100">
               {pendingDocs.slice(0, 3).map((doc) => (
                 <div key={doc.id} className="py-6 first:pt-0 last:pb-0">
