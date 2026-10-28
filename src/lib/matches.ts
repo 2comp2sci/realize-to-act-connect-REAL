@@ -28,13 +28,13 @@ function starterMessage(accepter: User, request: ConnectionRequest): string {
 /** Placeholder reply pre-filled in the composer for the accepting side. */
 export function accepterDraft(request: ConnectionRequest): string {
   return request.kind === 'offer'
-    ? 'What days and times work best for you to drop off or for us to pick up?'
-    : 'What days and times work best for us to drop off these items, and where should we go when we arrive?';
+    ? `Hi ${request.fromName}! What days and times work best for you to drop off, or for us to pick up?`
+    : `Hi ${request.fromName}! What days and times work best for us to drop off these items, and where should we go when we arrive?`;
 }
 
 /** Placeholder reply pre-filled in the composer for the side whose request was accepted. */
 export function requesterDraft(partnerName: string): string {
-  return `Thank you so much, ${partnerName}! Here are some days and times that work for us: `;
+  return `Hi ${partnerName}, thank you so much! Here are some days and times that work for us: `;
 }
 
 /**
