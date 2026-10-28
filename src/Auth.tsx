@@ -13,12 +13,19 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   sendPasswordResetEmail,
+  signOut,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 interface AuthProps {
   onLogin: (type: UserType, uid: string) => void;
+  // Bracket a sign-in attempt so App.tsx waits for onLogin instead of loading
+  // the Firebase user as soon as the sign-in itself succeeds.
+  onLoginStart: () => void;
+  onLoginAbort: () => void;
 }
+
+const typeLabel = (type: UserType) => (type === 'school' ? 'School District' : 'Community Partner');
 
 // Convert Firebase error codes to friendly messages
 const getFriendlyError = (code: string) => {
@@ -39,7 +46,7 @@ const getFriendlyError = (code: string) => {
   }
 };
 
-export default function Auth({ onLogin }: AuthProps) {
+export default function Auth({ onLogin, onLoginStart, onLoginAbort }: AuthProps) {
   const [view, setView] = useState<'login' | 'signup' | 'reset'>('login');
   const [userType, setUserType] = useState<UserType>('community-partner');
   const [showPassword, setShowPassword] = useState(false);
@@ -74,6 +81,19 @@ export default function Auth({ onLogin }: AuthProps) {
     }, 1000);
   };
 
+  // Finishes a login for an existing account, refusing it (and signing back
+  // out) when the account's type doesn't match the School District /
+  // Community Partner toggle the user picked.
+  const completeLogin = async (uid: string, savedType: UserType | undefined) => {
+    if (savedType && savedType !== userType) {
+      await signOut(auth);
+      onLoginAbort();
+      setError(`This account is registered as a ${typeLabel(savedType)}. Select "${typeLabel(savedType)}" above to log in.`);
+      return;
+    }
+    onLogin(savedType ?? userType, uid);
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -84,11 +104,12 @@ export default function Auth({ onLogin }: AuthProps) {
     setPasswordError('');
     try {
       setIsAuthenticating(true);
+      onLoginStart();
       const userCredential = await signInWithEmailAndPassword(auth, loginEmail, password);
       const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
-      const savedType = userDoc.exists() ? userDoc.data().userType : userType;
-      onLogin(savedType as UserType, userCredential.user.uid);
+      await completeLogin(userCredential.user.uid, userDoc.exists() ? userDoc.data().userType : undefined);
     } catch (err: any) {
+      onLoginAbort();
       setError(getFriendlyError(err.code));
     } finally {
       setIsAuthenticating(false);
@@ -109,6 +130,7 @@ export default function Auth({ onLogin }: AuthProps) {
     setPasswordError('');
     try {
       setIsAuthenticating(true);
+      onLoginStart();
       const userCredential = await createUserWithEmailAndPassword(auth, signupEmail, password);
       await setDoc(doc(db, 'users', userCredential.user.uid), {
         uid: userCredential.user.uid,
@@ -123,6 +145,7 @@ export default function Auth({ onLogin }: AuthProps) {
       });
       onLogin(userType, userCredential.user.uid);
     } catch (err: any) {
+      onLoginAbort();
       setError(getFriendlyError(err.code));
     } finally {
       setIsAuthenticating(false);
@@ -134,6 +157,7 @@ export default function Auth({ onLogin }: AuthProps) {
     setError('');
     try {
       setIsAuthenticating(true);
+      onLoginStart();
       const result = await signInWithPopup(auth, provider === 'google' ? googleProvider : microsoftProvider);
       const userRef = doc(db, 'users', result.user.uid);
       const userDoc = await getDoc(userRef);
@@ -147,9 +171,10 @@ export default function Auth({ onLogin }: AuthProps) {
           ...(agreed && { termsAcceptedAt: new Date().toISOString() })
         });
       }
-      const savedType = userDoc.exists() ? userDoc.data().userType : userType;
-      onLogin(savedType as UserType, result.user.uid);
+      // A brand-new account was just created with the selected type above.
+      await completeLogin(result.user.uid, userDoc.exists() ? userDoc.data().userType : undefined);
     } catch (err: any) {
+      onLoginAbort();
       setError(getFriendlyError(err.code));
     } finally {
       setIsAuthenticating(false);

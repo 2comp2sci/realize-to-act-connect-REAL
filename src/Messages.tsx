@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
-import { Chat, ConnectionRequest, User, Document } from './types';
+import { Chat, ConnectionRequest, User, Document, Message } from './types';
 import { sendMessage, subscribeToMessages } from './lib/chats';
 
 interface MessagesProps {
@@ -35,6 +35,10 @@ export default function Messages({
   setChats
 }: MessagesProps) {
   const [message, setMessage] = useState('');
+  // Loaded messages, by chat id. Kept here rather than on `chats` because the
+  // chats subscription in App.tsx replaces every chat object whenever a chat's
+  // lastMessage changes (e.g. right after sending), which would drop them.
+  const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({});
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [isSuggestedTimeDraft, setIsSuggestedTimeDraft] = useState(false);
   const [suggestedTimesDraft, setSuggestedTimesDraft] = useState<string[]>([]);
@@ -58,6 +62,7 @@ export default function Messages({
   const approvedChatNames = approvedConnectionsAll.map(c => c.fromName);
 
   const allApprovedChats = chats
+    .map(chat => (messagesByChat[chat.id] ? { ...chat, messages: messagesByChat[chat.id] } : chat))
     .filter(chat => (chat.participantUid && approvedUids.has(chat.participantUid)) || approvedChatNames.includes(chat.participantName))
     .sort((a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0));
 
@@ -126,7 +131,7 @@ export default function Messages({
   React.useEffect(() => {
     if (!activeChatId) return;
     const unsubscribe = subscribeToMessages(activeChatId, (messages) => {
-      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, messages } : c));
+      setMessagesByChat(prev => ({ ...prev, [activeChatId]: messages }));
     });
     return unsubscribe;
   }, [activeChatId]);

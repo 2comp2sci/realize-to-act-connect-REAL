@@ -113,40 +113,38 @@ export default function Dashboard({
             <h2 className="text-xl font-bold text-brand-dark mb-2">Actions Needed</h2>
             <p className="text-sm text-slate-500 mb-6">View and take action on current tasks and requests.</p>
             
-            {pendingConnections.length > 0 ? (
-              <div 
-                onClick={() => setActionsNeededRead(true)}
-                className={cn(
-                  "p-6 rounded-[5px] border transition-all cursor-pointer",
-                  actionsNeededRead 
-                    ? "border-slate-100 bg-slate-50/50" 
-                    : "border-brand-primary/20 bg-brand-secondary/10"
-                )}
-              >
-                <div className="flex justify-between items-start mb-2">
+            {pendingConnections.length > 0 && !actionsNeededRead ? (
+              <div className="p-6 rounded-[5px] border border-brand-primary/20 bg-brand-secondary/10">
+                <div className="flex justify-between items-start mb-2 gap-4">
                   <div className="flex items-center gap-2">
-                    {!actionsNeededRead && <div className="w-2 h-2 rounded-full bg-brand-primary" />}
-                    <span className={cn(
-                      "font-bold transition-colors",
-                      actionsNeededRead ? "text-slate-400" : "text-brand-dark"
-                    )}>
-                      {actionsNeededRead 
-                        ? "No actions needed" 
-                        : `Respond to your ${pendingConnections.length} new ${pendingConnections.length === 1 ? 'request' : 'requests'}`
-                      }
+                    <div className="w-2 h-2 rounded-full bg-brand-primary" />
+                    <span className="font-bold text-brand-dark">
+                      {`Respond to your ${pendingConnections.length} new ${pendingConnections.length === 1 ? 'request' : 'requests'}`}
                     </span>
                   </div>
-                  <span className="text-xs text-slate-400">{pendingConnections[0].timeAgo}</span>
+                  <span className="text-xs text-slate-400 whitespace-nowrap">{pendingConnections[0].timeAgo}</span>
                 </div>
-                <p className={cn(
-                  "text-sm ml-4 transition-colors",
-                  actionsNeededRead ? "text-slate-400" : "text-slate-600"
-                )}>
-                  {actionsNeededRead 
-                    ? "Your dashboard is up to date." 
-                    : `${Array.from(new Set(pendingConnections.map(c => c.fromName))).join(', ')} ${pendingConnections.length === 1 ? 'is' : 'are'} waiting on your response`
-                  }
+                <p className="text-sm ml-4 text-slate-600">
+                  {`${Array.from(new Set(pendingConnections.map(c => c.fromName))).join(', ')} ${pendingConnections.length === 1 ? 'is' : 'are'} waiting on your response`}
                 </p>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setActionsNeededRead(true)}
+                    className="px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-[5px] transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    <X size={14} />
+                    <span>Dismiss</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('requests')}
+                    className="px-3 py-1.5 bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold rounded-[5px] transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>View Requests</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="h-32 flex items-center justify-center border border-dashed border-slate-200 rounded-[5px] text-slate-400 text-sm">

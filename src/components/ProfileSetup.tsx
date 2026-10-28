@@ -343,7 +343,7 @@ export default function ProfileSetup({ user, onComplete, onSkip }: ProfileSetupP
                     <div className="sm:col-span-2">
                       <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center gap-1.5">
                         <FileText size={13} className="text-brand-primary" />
-                        Mission Statement / About Organization
+                        {user.type === 'school' ? 'About School District' : 'Mission Statement / About Organization'}
                       </label>
                       <textarea 
                         rows={2}

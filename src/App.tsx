@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import Auth from './Auth';
 import Layout from './Layout';
@@ -81,8 +81,17 @@ export default function App() {
   // Restore the session on refresh: Firebase Auth persists the sign-in
   // client-side, so if there's still a valid uid we just re-load its profile
   // instead of bouncing back to the login screen.
+  // True while Auth.tsx is signing someone in and checking their account type;
+  // Auth hands the user over via handleLogin (or signs them back out), so the
+  // listener below mustn't load them first.
+  const loginInProgressRef = useRef(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser && loginInProgressRef.current) {
+        setIsLoading(false);
+        return;
+      }
       if (firebaseUser) {
         const loadedUser = await loadUser(firebaseUser.uid, 'community-partner');
         setUser(loadedUser);
@@ -113,8 +122,18 @@ export default function App() {
     };
   }, [user?.id, user?.type]);
 
+  // A dismissed "Actions Needed" card comes back when a new request arrives.
+  // Same filter as the Dashboard's card: pending requests addressed to the user.
+  const actionCount = connections.filter(c => c.status === 'pending' && c.type === 'received' && !c.isBroadcast).length;
+  const prevActionCountRef = useRef(0);
+  useEffect(() => {
+    if (actionCount > prevActionCountRef.current) setActionsNeededRead(false);
+    prevActionCountRef.current = actionCount;
+  }, [actionCount]);
+
   const handleLogin = async (type: UserType, uid: string) => {
     const loadedUser = await loadUser(uid, type);
+    loginInProgressRef.current = false;
     setUser(loadedUser);
   };
 
@@ -178,7 +197,13 @@ export default function App() {
   }
 
   if (!user) {
-    return <Auth onLogin={handleLogin} />;
+    return (
+      <Auth
+        onLogin={handleLogin}
+        onLoginStart={() => { loginInProgressRef.current = true; }}
+        onLoginAbort={() => { loginInProgressRef.current = false; }}
+      />
+    );
   }
 
   // Show the onboarding flow once, right after signup (or on the first login
