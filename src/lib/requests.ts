@@ -1,0 +1,232 @@
+// Firestore-backed storage for connection/supply requests (sent & received).
+// Backs the "Requests Management" screen (src/Requests.tsx) as well as the
+// quick-approve actions on the Dashboard.
+//
+// Firestore schema — collection "requests":
+//   fromUid:      string            uid of the requester
+//   fromName:     string            display name of the requester
+//   fromAvatar:   string            avatar URL of the requester
+//   toUid:        string | null     uid of the specific recipient, or null to
+//                                   broadcast the request to every partner
+//   toName:       string | null     display name of the recipient (if any)
+//   toAvatar:     string | null     avatar URL of the recipient (if any)
+//   item:         string
+//   quantity:     number
+//   distance:     string
+//   description:  string
+//   availability: AvailabilitySlot[] | null
+//   schoolRequestData: SchoolResourceRequest | null   resource manifest (categories,
+//                                   items, grade bands, logistics) attached by the
+//                                   Search page's supply request form
+//   status:       'pending' | 'approved' | 'denied'
+//   createdAt:    Timestamp (serverTimestamp)
+//   updatedAt:    Timestamp (serverTimestamp)
+//
+// "Sent" vs "received" not stored, derived per-viewer from fromUid.
+
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  type DocumentData,
+  type Query,
+  type Unsubscribe,
+} from 'firebase/firestore';
+import { db } from './firebase';
+import { AvailabilitySlot, ConnectionRequest, SchoolResourceRequest } from '../types';
+
+const REQUESTS_COLLECTION = 'requests';
+
+export interface NewRequestInput {
+  fromUid: string;
+  fromName: string;
+  fromAvatar: string;
+  toUid: string | null;
+  toName?: string | null;
+  toAvatar?: string | null;
+  item: string;
+  quantity: number;
+  distance?: string;
+  description?: string;
+  availability?: AvailabilitySlot[];
+  schoolRequestData?: SchoolResourceRequest;
+}
+
+/** Short relative time ("Just now", "5 mins ago", "3 days ago") for request cards. */
+export function formatTimeAgo(timestamp: number): string {
+  const minutes = Math.floor((Date.now() - timestamp) / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function toConnectionRequest(id: string, data: DocumentData, viewerUid: string): ConnectionRequest {
+  const isSent = data.fromUid === viewerUid;
+  const timestamp = data.createdAt?.toMillis?.() ?? Date.now();
+  return {
+    id,
+    fromId: isSent ? (data.toUid ?? 'everyone') : data.fromUid,
+    fromName: isSent ? (data.toName ?? 'Everyone') : data.fromName,
+    fromAvatar: isSent ? (data.toAvatar ?? data.fromAvatar) : data.fromAvatar,
+    type: isSent ? 'sent' : 'received',
+    status: data.status,
+    item: data.item,
+    quantity: data.quantity,
+    distance: data.distance ?? 'N/A',
+    timeAgo: formatTimeAgo(timestamp),
+    timestamp,
+    description: data.description ?? undefined,
+    availability: data.availability ?? undefined,
+    isNew: data.status === 'pending' && !isSent,
+    schoolRequestData: data.schoolRequestData ?? undefined,
+  };
+}
+
+/**
+ * Subscribes to every request the given uid can see: requests they sent,
+ * requests addressed directly to them, and open broadcast requests (toUid
+ * == null) from everyone else. Calls `onChange` with the merged, sorted
+ * list every time any of the underlying queries update.
+ */
+export function subscribeToRequests(
+  uid: string,
+  onChange: (requests: ConnectionRequest[]) => void
+): Unsubscribe {
+  const results = new Map<string, ConnectionRequest>();
+
+  const emit = () => {
+    onChange(Array.from(results.values()).sort((a, b) => b.timestamp - a.timestamp));
+  };
+
+  const attach = (q: Query<DocumentData>) =>
+    onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'removed') {
+          results.delete(change.doc.id);
+          return;
+        }
+        const data = change.doc.data();
+        // A broadcast request the viewer sent themselves is already
+        // covered by the "sent" query below — skip the duplicate.
+        if (data.toUid === null && data.fromUid === uid) return;
+        results.set(change.doc.id, toConnectionRequest(change.doc.id, data, uid));
+      });
+      emit();
+    });
+
+  const sentQuery = query(collection(db, REQUESTS_COLLECTION), where('fromUid', '==', uid));
+  const receivedQuery = query(collection(db, REQUESTS_COLLECTION), where('toUid', '==', uid));
+  const broadcastQuery = query(collection(db, REQUESTS_COLLECTION), where('toUid', '==', null));
+
+  const unsubscribes = [attach(sentQuery), attach(receivedQuery), attach(broadcastQuery)];
+  return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+}
+
+/** Creates a new request document (a "sent" request from the caller's perspective). */
+export async function createRequest(input: NewRequestInput): Promise<string> {
+  const ref = await addDoc(collection(db, REQUESTS_COLLECTION), {
+    fromUid: input.fromUid,
+    fromName: input.fromName,
+    fromAvatar: input.fromAvatar,
+    toUid: input.toUid ?? null,
+    toName: input.toName ?? null,
+    toAvatar: input.toAvatar ?? null,
+    item: input.item,
+    quantity: input.quantity,
+    distance: input.distance ?? 'N/A',
+    description: input.description ?? '',
+    availability: input.availability ?? null,
+    // JSON round-trip drops undefined optional fields, which Firestore rejects.
+    schoolRequestData: input.schoolRequestData ? JSON.parse(JSON.stringify(input.schoolRequestData)) : null,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+/**
+ * Approves or denies a request. `respondingUid`/`respondingName`/`respondingAvatar`
+ * should be supplied when claiming a broadcast (toUid == null) request, so the
+ * request becomes attributed to whoever acted on it.
+ */
+export async function respondToRequest(
+  requestId: string,
+  status: 'approved' | 'denied',
+  claim?: { uid: string; name: string; avatar: string }
+): Promise<void> {
+  const update: Record<string, unknown> = { status, updatedAt: serverTimestamp() };
+  if (claim) {
+    update.toUid = claim.uid;
+    update.toName = claim.name;
+    update.toAvatar = claim.avatar;
+  }
+  await updateDoc(doc(db, REQUESTS_COLLECTION, requestId), update);
+}
+
+/** Cancels a request the current user sent (only the sender is allowed to, per firestore.rules). */
+export async function cancelRequest(requestId: string): Promise<void> {
+  await deleteDoc(doc(db, REQUESTS_COLLECTION, requestId));
+}
+
+export interface SchoolSentRequest {
+  id?: string;
+  userId: string;
+  fromName: string;
+  communityPartner: string;
+  communityPartnerId?: string;
+  item: string;
+  quantity: number;
+  additionalDetails?: string;
+  timestamp?: number;
+}
+
+export async function recordSchoolSentRequest(data: SchoolSentRequest): Promise<string> {
+  try {
+    const ref = await addDoc(collection(db, 'requests-sent'), {
+      ...data,
+      createdAt: serverTimestamp(),
+    });
+    return ref.id;
+  } catch (err) {
+    console.warn('Could not record sent request to requests-sent:', err);
+    return 'local-' + Date.now();
+  }
+}
+
+export function subscribeToSchoolSentRequests(
+  userId: string,
+  onChange: (requests: SchoolSentRequest[]) => void
+): Unsubscribe {
+  try {
+    const q = query(collection(db, 'requests-sent'), where('userId', '==', userId));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<SchoolSentRequest, 'id'>),
+        }));
+        onChange(list);
+      },
+      (err) => {
+        console.warn('Could not subscribe to school sent requests:', err);
+        onChange([]);
+      }
+    );
+  } catch (err) {
+    console.warn('Could not setup school sent requests subscription:', err);
+    onChange([]);
+    return () => {};
+  }
+}
+

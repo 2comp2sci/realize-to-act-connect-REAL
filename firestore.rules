@@ -1,0 +1,147 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // --- User profiles (created by Auth.tsx on signup) ---
+    match /users/{uid} {
+      // Any signed-in user can look up a partner's name/avatar/availability.
+      allow read: if isSignedIn();
+      // Only the owner can create or edit their own profile.
+      allow create, update: if isSignedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // --- Public "About" page profiles (written by src/lib/profiles.ts) ---
+    match /publicProfiles/{uid} {
+      // Any signed-in user can view an organization's About page.
+      allow read: if isSignedIn();
+      // Only the owner can publish or edit their own About page.
+      allow create, update: if isSignedIn() && request.auth.uid == uid &&
+        request.resource.data.uid == uid;
+      allow delete: if false;
+    }
+
+    // --- Connection / supply requests (Requests.tsx "sent" & "received") ---
+    match /requests/{requestId} {
+      // Visible to the sender, the direct recipient, or everyone (broadcast requests).
+      allow read: if isSignedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid ||
+        resource.data.toUid == null
+      );
+
+      // Only the sender can create a request, and only in the 'pending' state.
+      allow create: if isSignedIn() &&
+        request.resource.data.fromUid == request.auth.uid &&
+        request.resource.data.status == 'pending';
+
+      // The sender may cancel their own request; the recipient (or, for a
+      // broadcast request, whoever claims it) may approve/deny it.
+      allow update: if isSignedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid ||
+        (resource.data.toUid == null && request.resource.data.toUid == request.auth.uid)
+      );
+
+      allow delete: if isSignedIn() && resource.data.fromUid == request.auth.uid;
+    }
+
+    // --- Organization connections (src/lib/connections.ts) ---
+    // True when `data.requestId` points at an approved resource request between
+    // exactly the two participants — what lets an approval auto-connect them.
+    function isApprovedRequestBetween(data) {
+      let req = get(/databases/$(database)/documents/requests/$(data.requestId)).data;
+      return req.status == 'approved' &&
+        [req.fromUid, req.toUid].toSet() == data.participantUids.toSet();
+    }
+
+    match /connections/{pairId} {
+      // `resource == null` lets a participant check whether a connection exists yet.
+      allow read: if isSignedIn() &&
+        (resource == null || request.auth.uid in resource.data.participantUids);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.participantUids.size() == 2 &&
+        request.resource.data.participantUids[0] < request.resource.data.participantUids[1] &&
+        pairId == request.resource.data.participantUids[0] + '_' + request.resource.data.participantUids[1] &&
+        request.auth.uid in request.resource.data.participantUids &&
+        request.resource.data.requesterUid in request.resource.data.participantUids &&
+        request.resource.data.recipientUid in request.resource.data.participantUids &&
+        request.resource.data.requesterUid != request.resource.data.recipientUid && (
+          // A connection request sent from the Search page.
+          (request.resource.data.status == 'pending' &&
+            request.resource.data.requesterUid == request.auth.uid) ||
+          // Auto-connect on an approved resource request.
+          (request.resource.data.status == 'accepted' &&
+            isApprovedRequestBetween(request.resource.data))
+        );
+
+      allow update: if isSignedIn() &&
+        request.auth.uid in resource.data.participantUids && (
+          // The recipient accepts a pending request.
+          (resource.data.status == 'pending' &&
+            resource.data.recipientUid == request.auth.uid &&
+            request.resource.data.status == 'accepted' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+          // Either side upgrades a pending request after approving a resource request.
+          (request.resource.data.status == 'accepted' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'source', 'requestId', 'updatedAt']) &&
+            isApprovedRequestBetween(request.resource.data))
+        );
+
+      // Either participant can decline, withdraw, or remove the connection.
+      allow delete: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+    }
+
+    // --- Per-partner log of supply requests a school sent from Search (src/lib/requests.ts) ---
+    match /requests-sent/{entryId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // --- Acknowledgement letters awaiting signature (src/lib/documents.ts) ---
+    match /documents/{documentId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+
+      // Created by the approver, for exactly two participants including themselves.
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.participantUids.size() == 2 &&
+        request.auth.uid in request.resource.data.participantUids &&
+        request.resource.data.status == 'pending';
+
+      // Either participant can sign; nothing else about the letter can change.
+      allow update: if isSignedIn() &&
+        request.auth.uid in resource.data.participantUids &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'signedDate', 'updatedAt']) &&
+        request.resource.data.status == 'signed';
+
+      // Either participant can reject/remove a letter.
+      allow delete: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+    }
+
+    // --- Chats & messages (Messages.tsx "messages sent" & "messages received") ---
+    match /chats/{chatId} {
+      allow read, update: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.participantUids;
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantUids;
+
+        allow create: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantUids &&
+          request.resource.data.senderId == request.auth.uid;
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

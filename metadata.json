@@ -1,0 +1,8 @@
+{
+  "name": "Realize To Act",
+  "description": "A platform connecting school districts and community partners to streamline resource sharing and community support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
